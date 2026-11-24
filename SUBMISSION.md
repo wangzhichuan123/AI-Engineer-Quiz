@@ -21,7 +21,7 @@ source .venv/bin/activate
 python -m pip install -r requirements-test.txt -e '.[dev]'
 ```
 
-`requirements-test.txt` 固定本次验证使用的依赖版本；未引入新运行时组件。
+`requirements-test.txt` 在 Python 3.11+ 固定本次验证使用的依赖版本；Python 3.10 对已停止支持该版本的 FastAPI、Pillow、multipart 及其依赖使用兼容版本解析。未引入新运行时组件。
 
 Linux/macOS：
 
