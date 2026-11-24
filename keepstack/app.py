@@ -6,11 +6,12 @@ single-page web client is served from the ``web/`` directory at the root.
 """
 from __future__ import annotations
 
+import csv
 import io
 import ipaddress
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import (Body, Depends, FastAPI, File, Form, HTTPException, Query,
                      Request, UploadFile)
@@ -173,21 +174,45 @@ async def upload_assets(
     return {"created": results}
 
 
-@app.get("/api/assets")
-def list_assets(
+def asset_filters(
     q: str = "",
     media_type: Optional[str] = None,
     tag: Optional[str] = None,
-    collection_id: Optional[int] = None,
-    status: str = "active",
-    sort: str = "newest",
-    mode: str = "keyword",
-    limit: int = Query(60, le=200),
-    offset: int = 0,
+    include_tags: list[str] = Query(default=[]),
+    exclude_tags: list[str] = Query(default=[]),
+    collection_id: Optional[int] = Query(None, ge=1, le=9223372036854775807),
+    status: Literal["active"] = "active",
+    sort: Literal["newest", "oldest", "name", "largest"] = "newest",
+    mode: Literal["keyword"] = "keyword",
+):
+    return dict(q=q, media_type=media_type, tag=tag, include_tags=include_tags,
+                exclude_tags=exclude_tags, collection_id=collection_id, status=status, sort=sort)
+
+
+@app.get("/api/assets")
+def list_assets(
+    filters: dict = Depends(asset_filters),
+    limit: int = Query(60, ge=1, le=200),
+    offset: int = Query(0, ge=0, le=9223372036854775807),
     user: dict = Depends(require_user),
 ):
-    return search.search(q=q, media_type=media_type, tag=tag, collection_id=collection_id,
-                         status=status, sort=sort, mode=mode, limit=limit, offset=offset)
+    return search.search(**filters, limit=limit, offset=offset)
+
+
+# Register before /api/assets/{uuid}, so "export.csv" is not treated as a UUID.
+@app.get("/api/assets/export.csv")
+def export_assets(filters: dict = Depends(asset_filters), user: dict = Depends(require_user)):
+    fields = ["uuid", "title", "description", "filename", "media_type", "tags", "created_at"]
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=fields)
+    writer.writeheader()
+    for asset in search.export_rows(**filters):
+        row = {key: asset[key] for key in fields}
+        row["tags"] = json.dumps(row["tags"], ensure_ascii=False)
+        writer.writerow(row)
+    return Response(content=output.getvalue().encode("utf-8-sig"), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="keepstack-assets.csv"',
+                             "Cache-Control": "no-store"})
 
 
 def _get_asset_or_404(uuid: str) -> dict:
