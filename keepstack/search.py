@@ -63,15 +63,27 @@ def _selection(*, q="", media_type=None, tag=None, include_tags=(),
 
 
 def export_rows(**filters):
-    """Read all matching rows in list order, with tags in deterministic order."""
+    """Read export fields and batch tag lookups, keeping memory bounded per batch."""
     clause, params, order = _selection(**filters)
     conn = get_conn()
-    for row in conn.execute(f"SELECT a.* {clause} ORDER BY {order}", params):
-        asset = dict(row)
-        asset["tags"] = [r["name"] for r in conn.execute(
-            "SELECT t.name FROM tags t JOIN asset_tags at ON at.tag_id = t.id "
-            "WHERE at.asset_id = ? ORDER BY t.name", (asset["id"],))]
-        yield asset
+    # Do not fetch embeddings or unrelated metadata when exporting a text manifest.
+    cursor = conn.execute(
+        f"SELECT a.id, a.uuid, a.title, a.description, a.filename, a.media_type, a.created_at "
+        f"{clause} ORDER BY {order}", params)
+    try:
+        while rows := cursor.fetchmany(200):
+            tags = {row["id"]: [] for row in rows}
+            placeholders = ",".join("?" for _ in rows)
+            for tag_row in conn.execute(
+                    "SELECT at.asset_id, t.name FROM asset_tags at JOIN tags t ON t.id = at.tag_id "
+                    f"WHERE at.asset_id IN ({placeholders}) ORDER BY at.asset_id, t.name", list(tags)):
+                tags[tag_row["asset_id"]].append(tag_row["name"])
+            for row in rows:
+                asset = dict(row)
+                asset["tags"] = tags[row["id"]]
+                yield asset
+    finally:
+        cursor.close()
 
 
 def search(

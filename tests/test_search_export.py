@@ -2,6 +2,7 @@
 import csv
 import io
 import sqlite3
+from urllib.parse import quote
 
 import pytest
 from fastapi.testclient import TestClient
@@ -138,3 +139,44 @@ def test_edits_reindex_title_description_and_tags(catalog):
     assert get_csv(client, include_tags=["newneedle"]) == []
     assert client.post(path + "/tags", json={"name": "internal"}).status_code == 200
     assert get_csv(client, exclude_tags=["internal"], q="freshneedle") == []
+
+
+def test_remove_tag_with_slash_updates_query_and_export(catalog):
+    client, data = catalog
+    path = "/api/assets/" + data["uuids"][0]
+    name = '客户/外宣, "甲" #1?'
+    assert client.post(path + "/tags", json={"name": name}).status_code == 200
+    assert get_list(client, include_tags=[name])["total"] == 1
+    assert len(get_csv(client, include_tags=[name])) == 1
+    assert client.delete(path + "/tags/" + quote(name, safe="")).status_code == 200
+    assert get_list(client, include_tags=[name])["total"] == 0
+    assert get_csv(client, include_tags=[name]) == []
+
+
+def test_large_export_batches_tags_without_skipping_rows(catalog):
+    import json
+    client, _ = catalog
+    conn = db.get_conn()
+    # No blobs are needed for metadata-only export. Span multiple export batches.
+    for index in range(450):
+        cur = conn.execute(
+            "INSERT INTO assets (uuid, sha256, filename, title, storage_key, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (f"batch-{index}", "synthetic", "batch.txt", "batchneedle", "unused",
+             "2026-02-01T00:00:00Z", "2026-02-01T00:00:00Z"))
+        if index % 2 == 0:
+            conn.execute("INSERT INTO asset_tags (asset_id, tag_id) "
+                         "SELECT ?, id FROM tags WHERE name IN ('approved', 'campaign')", (cur.lastrowid,))
+        conn.execute("INSERT INTO asset_fts (rowid, title) VALUES (?,?)", (cur.lastrowid, "batchneedle"))
+    conn.commit()
+    statements = []
+    conn.set_trace_callback(statements.append)
+    try:
+        rows = get_csv(client, q="batchneedle", sort="oldest")
+    finally:
+        conn.set_trace_callback(None)
+    assert [row["uuid"] for row in rows] == [f"batch-{i}" for i in range(450)]
+    assert all(json.loads(row["tags"]) == (["approved", "campaign"] if i % 2 == 0 else [])
+               for i, row in enumerate(rows))
+    selects = [sql for sql in statements if sql.lstrip().upper().startswith("SELECT")]
+    assert len(selects) <= 8, f"Export performed {len(selects)} SELECTs for 450 rows"
