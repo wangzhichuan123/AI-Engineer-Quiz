@@ -76,7 +76,12 @@
             </div>
           </div>
           <div class="search-filters">
-            <label>Collection<select id="filter-collection"><option value="">All collections</option></select></label>
+            <label>Collection<select id="filter-collection" aria-label="Collection"><option value="">All collections</option></select></label>
+            <label>Media type<select id="filter-media" aria-label="Media type">
+              <option value="">All media types</option><option value="image">Image</option>
+              <option value="document">Document</option><option value="video">Video</option>
+              <option value="audio">Audio</option><option value="other">Other</option>
+            </select></label>
             <div>
               <form id="include-form"><label>Include all tags<input id="include-tag" placeholder="Exact tag name"></label><button class="btn" type="submit">Add include</button></form>
               <div id="include-chips" class="tag-row"></div>

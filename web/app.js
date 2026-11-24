@@ -63,6 +63,7 @@ let searchTimer, searchController, searchVersion = 0;
 $("#search").addEventListener("input", (e) => { state.q = e.target.value; loadLibrary(true, 250); });
 $("#sort").addEventListener("change", (e) => { state.sort = e.target.value; loadLibrary(true); });
 $("#filter-collection").addEventListener("change", (e) => { state.collection = e.target.value || null; loadLibrary(true); });
+$("#filter-media").addEventListener("change", (e) => { state.media = e.target.value || null; loadLibrary(true); });
 $("#clear-filters").addEventListener("click", () => {
   state.q = ""; state.media = null; state.collection = null;
   state.includeTags = []; state.excludeTags = [];
@@ -104,6 +105,7 @@ async function loadFilterCollections() {
 
 function renderFilters() {
   $("#filter-collection").value = state.collection || "";
+  $("#filter-media").value = state.media || "";
   for (const kind of ["include", "exclude"]) {
     const container = $("#" + kind + "-chips");
     container.innerHTML = state[kind + "Tags"].map((t, i) =>
