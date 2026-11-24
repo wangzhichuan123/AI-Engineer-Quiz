@@ -30,11 +30,7 @@
         <strong>Keepstack</strong>
       </div>
       <div class="search-box">
-        <input id="search" placeholder="Search assets, tags, metadata...">
-        <select id="search-mode" title="Search mode">
-          <option value="keyword">Keyword</option>
-          <option value="semantic">Semantic</option>
-        </select>
+        <input id="search" aria-label="Search keywords" placeholder="Search assets, tags, metadata...">
       </div>
       <div class="topbar-right">
         <button id="btn-upload" class="btn btn-primary">Upload</button>
@@ -57,11 +53,11 @@
 
         <div id="facets" class="facets">
           <div class="facet-group">
-            <h4>Media type</h4>
+            <h4>Media type (all active assets)</h4>
             <ul id="facet-media"></ul>
           </div>
           <div class="facet-group">
-            <h4>Top tags</h4>
+            <h4>Top tags (all active assets)</h4>
             <ul id="facet-tags"></ul>
           </div>
         </div>
@@ -72,17 +68,35 @@
           <div class="view-head">
             <h2 id="result-title">Library</h2>
             <div class="view-controls">
-              <span id="active-filter" class="chip hidden"></span>
-              <select id="sort">
+              <button id="export-csv" class="btn">Export all matches (CSV)</button>
+              <select id="sort" aria-label="Sort by creation time">
                 <option value="newest">Newest</option>
                 <option value="oldest">Oldest</option>
-                <option value="name">Name</option>
-                <option value="largest">Largest</option>
               </select>
             </div>
           </div>
+          <div class="search-filters">
+            <label>Collection<select id="filter-collection"><option value="">All collections</option></select></label>
+            <div>
+              <form id="include-form"><label>Include all tags<input id="include-tag" placeholder="Exact tag name"></label><button class="btn" type="submit">Add include</button></form>
+              <div id="include-chips" class="tag-row"></div>
+            </div>
+            <div>
+              <form id="exclude-form"><label>Exclude any tags<input id="exclude-tag" placeholder="Exact tag name"></label><button class="btn" type="submit">Add exclude</button></form>
+              <div id="exclude-chips" class="tag-row"></div>
+            </div>
+            <button id="clear-filters" class="btn" type="button">Clear filters</button>
+          </div>
+          <p id="active-filter" class="muted" aria-live="polite"></p>
+          <p id="search-status" role="status" aria-live="polite"></p>
+          <button id="retry-search" class="btn hidden">Retry search</button>
           <div id="grid" class="grid"></div>
-          <div id="empty" class="empty hidden">No assets yet. Click Upload to get started.</div>
+          <div id="empty" class="empty hidden">No matching assets. Try changing or clearing the filters.</div>
+          <div class="pagination" aria-label="Search pagination">
+            <button id="prev-page" class="btn" disabled>Previous</button>
+            <span id="page-info" aria-live="polite"></span>
+            <button id="next-page" class="btn" disabled>Next</button>
+          </div>
         </div>
 
         <div id="view-collections" class="view hidden">

@@ -34,6 +34,15 @@ body { background: var(--base-0); color: var(--text); font-family: var(--font); 
 .hidden { display: none !important; }
 .muted { color: var(--muted); }
 .error { color: var(--danger); }
+.search-filters { display: flex; flex-wrap: wrap; align-items: start; gap: 16px; padding: 16px; background: var(--base-1); border: 1px solid var(--base-3); border-radius: 8px; }
+.search-filters label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.search-filters form { display: flex; align-items: end; gap: 8px; }
+.search-filters input, .search-filters select { padding: 8px; border: 1px solid var(--base-3); border-radius: 4px; max-width: 220px; }
+.search-filters .tag-row { margin-top: 8px; }
+.pagination { display: flex; justify-content: center; align-items: center; gap: 16px; margin: 24px 0; }
+button:disabled { opacity: .5; cursor: default; }
+#active-filter { overflow-wrap: anywhere; }
+.view-controls { flex-wrap: wrap; }
 
 button, input, select { font-family: inherit; font-size: inherit; }
 
