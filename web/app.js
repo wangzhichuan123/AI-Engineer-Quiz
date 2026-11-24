@@ -35,6 +35,7 @@ $("#login-form").addEventListener("submit", async (e) => {
 $("#btn-logout").addEventListener("click", logout);
 function logout() { localStorage.removeItem("keepstack_token"); state.token = null; state.user = null;
   ++searchVersion; clearTimeout(searchTimer); searchController?.abort();
+  ++collectionVersion; closeDrawer();
   $("#app").classList.add("hidden"); $("#login").classList.remove("hidden"); }
 
 function enterApp() {
@@ -51,7 +52,7 @@ $$(".nav-item").forEach(btn => btn.addEventListener("click", () => {
   const view = btn.dataset.view;
   $$(".view").forEach(v => v.classList.add("hidden"));
   $("#view-" + (view === "library" ? "library" : view)).classList.remove("hidden");
-  if (view === "library") loadLibrary();
+  if (view === "library") { loadFilterCollections(); loadLibrary(); }
   if (view === "collections") loadCollections();
   if (view === "dashboard") loadDashboard();
   if (view === "users") loadUsers();
@@ -60,6 +61,7 @@ $$(".nav-item").forEach(btn => btn.addEventListener("click", () => {
 
 // ---------- library / search ----------
 let searchTimer, searchController, searchVersion = 0;
+let collectionVersion = 0, collectionOptions = [];
 $("#search").addEventListener("input", (e) => { state.q = e.target.value; loadLibrary(true, 250); });
 $("#sort").addEventListener("change", (e) => { state.sort = e.target.value; loadLibrary(true); });
 $("#filter-collection").addEventListener("change", (e) => { state.collection = e.target.value || null; loadLibrary(true); });
@@ -95,15 +97,30 @@ function searchParams(paginated = true) {
 }
 
 async function loadFilterCollections() {
+  const version = ++collectionVersion;
   try {
     const data = await api("/api/collections");
-    $("#filter-collection").innerHTML = '<option value="">All collections</option>' +
-      data.collections.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
-    renderFilters();
-  } catch { toast("Could not load collection options. Reopen Library to retry.", "err"); }
+    if (version !== collectionVersion) return;
+    updateCollectionOptions(data.collections);
+  } catch {
+    if (version === collectionVersion) toast("Could not load collection options. Reopen Library to retry.", "err");
+  }
+}
+
+function updateCollectionOptions(collections) {
+  ++collectionVersion;
+  collectionOptions = collections;
+  renderFilters();
 }
 
 function renderFilters() {
+  const options = [...collectionOptions];
+  if (state.collection && !options.some(c => String(c.id) === String(state.collection))) {
+    // Keep the active filter visible while options load or after a collection is removed.
+    options.push({ id: state.collection, name: "Collection #" + state.collection });
+  }
+  $("#filter-collection").innerHTML = '<option value="">All collections</option>' +
+    options.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
   $("#filter-collection").value = state.collection || "";
   $("#filter-media").value = state.media || "";
   for (const kind of ["include", "exclude"]) {
@@ -117,7 +134,7 @@ function renderFilters() {
   const conditions = ["Active assets", state.sort === "oldest" ? "Created: oldest first" : "Created: newest first"];
   if (state.q.trim()) conditions.push("Keywords: " + state.q);
   if (state.media) conditions.push("Type: " + state.media);
-  if (state.collection) conditions.push("Collection: " + ($("#filter-collection").selectedOptions[0]?.textContent || state.collection));
+  if (state.collection) conditions.push("Collection: " + options.find(c => String(c.id) === String(state.collection)).name);
   if (state.includeTags.length) conditions.push("Include all: " + state.includeTags.join("; "));
   if (state.excludeTags.length) conditions.push("Exclude any: " + state.excludeTags.join("; "));
   $("#active-filter").textContent = conditions.join(" · ");
@@ -198,19 +215,31 @@ function renderFacets(facets) {
 
 // ---------- asset detail drawer ----------
 const drawer = $("#drawer");
+let drawerVersion = 0;
 $("#drawer-close").addEventListener("click", closeDrawer);
 $(".drawer-backdrop").addEventListener("click", closeDrawer);
-function closeDrawer() { drawer.classList.add("hidden"); document.body.classList.remove("modal-open"); }
+function closeDrawer() { ++drawerVersion; drawer.classList.add("hidden"); document.body.classList.remove("modal-open"); }
 
 async function openAsset(uuid) {
+  const version = ++drawerVersion;
   drawer.classList.remove("hidden");
   document.body.classList.add("modal-open");
   $("#drawer-body").innerHTML = '<p class="muted">Loading...</p>';
-  const [d, meta, sim] = await Promise.all([
-    api("/api/assets/" + uuid),
-    api("/api/assets/" + uuid + "/metadata"),
-    api("/api/assets/" + uuid + "/similar"),
-  ]);
+  let details;
+  try {
+    details = await Promise.all([
+      api("/api/assets/" + uuid),
+      api("/api/assets/" + uuid + "/metadata"),
+      api("/api/assets/" + uuid + "/similar"),
+    ]);
+  } catch {
+    if (version !== drawerVersion) return;
+    $("#drawer-body").innerHTML = '<p class="error" role="alert">Could not load asset details.</p><button class="btn" id="retry-detail">Retry</button>';
+    $("#retry-detail").addEventListener("click", () => openAsset(uuid));
+    return;
+  }
+  if (version !== drawerVersion) return;
+  const [d, meta, sim] = details;
   const a = d.asset;
   const canEdit = ["admin","editor","contributor"].includes(state.user.role);
   const preview = a.media_type === "image"
@@ -262,20 +291,37 @@ async function openAsset(uuid) {
   $$("#drawer-body .similar-strip img").forEach(img => img.addEventListener("click", () => openAsset(img.dataset.uuid)));
   if (canEdit) {
     $("#d-save")?.addEventListener("click", async () => {
+      const button = $("#d-save");
+      button.disabled = true;
       const body = {};
       ["title","description","alt_text","dc_creator","rights_statement","retention_until"].forEach(f => { const el = $("#e-"+f); if (el) body[f] = el.value; });
-      await api("/api/assets/"+uuid, { method: "PATCH", json: body });
-      toast("Saved"); openAsset(uuid); loadLibrary();
+      try {
+        await api("/api/assets/"+uuid, { method: "PATCH", json: body });
+        toast("Saved");
+        if (version === drawerVersion) openAsset(uuid);
+        loadLibrary();
+      } catch { toast("Could not save changes. Please retry.", "err"); }
+      finally { button.disabled = false; }
     });
     $("#tag-add")?.addEventListener("keydown", async (e) => {
       if (e.key === "Enter" && e.target.value.trim()) {
-        await api("/api/assets/"+uuid+"/tags", { json: { name: e.target.value.trim() } });
-        openAsset(uuid); loadLibrary();
+        e.preventDefault();
+        const input = e.target;
+        input.disabled = true;
+        try {
+          await api("/api/assets/"+uuid+"/tags", { json: { name: input.value.trim() } });
+          if (version === drawerVersion) openAsset(uuid);
+          loadLibrary();
+        } catch { toast("Could not add tag. Please retry.", "err"); }
+        finally { input.disabled = false; }
       }
     });
     $$("#tag-row .rm").forEach(rm => rm.addEventListener("click", async () => {
-      await api("/api/assets/"+uuid+"/tags/"+encodeURIComponent(rm.dataset.tag), { method: "DELETE" });
-      openAsset(uuid); loadLibrary();
+      try {
+        await api("/api/assets/"+uuid+"/tags/"+encodeURIComponent(rm.dataset.tag), { method: "DELETE" });
+        if (version === drawerVersion) openAsset(uuid);
+        loadLibrary();
+      } catch { toast("Could not remove tag. Please retry.", "err"); }
     }));
     $("#d-share")?.addEventListener("click", async () => {
       const r = await api("/api/shares", { json: { target_type: "asset", target_id: a.id, permission: "download" } });
@@ -320,7 +366,15 @@ async function uploadFiles(files) {
 
 // ---------- collections ----------
 async function loadCollections() {
-  const data = await api("/api/collections");
+  const version = ++collectionVersion;
+  let data;
+  try { data = await api("/api/collections"); }
+  catch {
+    if (version === collectionVersion) $("#collection-list").innerHTML = '<p class="error">Could not load collections. Reopen Collections to retry.</p>';
+    return;
+  }
+  if (version !== collectionVersion) return;
+  updateCollectionOptions(data.collections);
   $("#collection-list").innerHTML = data.collections.map(c =>
     `<div class="collection-card" data-id="${c.id}"><span class="n">${esc(c.name)}</span><span class="muted">${c.asset_count} assets</span><span class="muted">${esc(c.description||"")}</span></div>`).join("")
     || '<p class="muted">No collections yet.</p>';
@@ -334,7 +388,9 @@ async function loadCollections() {
 }
 $("#btn-new-collection").addEventListener("click", async () => {
   const name = prompt("Collection name"); if (!name) return;
-  await api("/api/collections", { json: { name } }); loadCollections();
+  try {
+    await api("/api/collections", { json: { name } }); loadCollections();
+  } catch { toast("Could not create collection. Please retry.", "err"); }
 });
 
 // ---------- dashboard ----------

@@ -20,7 +20,7 @@ function client() {
   };
   const context = vm.createContext({
     document: {
-      querySelector: node, querySelectorAll: () => [],
+      querySelector: node, querySelectorAll: selector => selector === '.nav-item' ? [node('nav-library')] : [],
       body: { classList: { add() {}, remove() {} }, appendChild() {} },
       createElement: () => ({ click() { downloads.push(this.download); }, remove() {} }),
     },
@@ -33,13 +33,17 @@ function client() {
       return new Promise((resolve, reject) => requests.push({ url, opts, resolve, reject }));
     },
   });
+  node('nav-library').dataset.view = 'library';
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../web/app.js'), 'utf8'), context);
   const run = code => vm.runInContext(code, context);
   const respond = (index, total = 50) => requests[index].resolve({
     ok: true, status: 200, headers: { get: () => 'application/json' },
     json: async () => ({ total, items: [], facets: { media_types: [], tags: [] } }),
   });
-  return { node, requests, timers, downloads, run, respond };
+  const respondJson = (index, data) => requests[index].resolve({
+    ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => data,
+  });
+  return { node, requests, timers, downloads, run, respond, respondJson };
 }
 
 test('latest query wins even when the old response arrives during debounce', async () => {
@@ -125,4 +129,66 @@ test('JSON requests default to POST so login and tag editing work in the browser
   const patch = c.run('api("/api/assets/example", {method:"PATCH", json: {title:"new"}})');
   assert.equal(c.requests[1].opts.method, 'PATCH');
   c.respond(1); await patch;
+});
+
+test('opening Collections refreshes the search options with newly created collections', async () => {
+  const c = client();
+  const loading = c.run('loadCollections()');
+  c.respondJson(0, { collections: [{ id: 7, name: 'New campaign', asset_count: 0 }] });
+  await loading;
+  assert.match(c.node('#filter-collection').innerHTML, /New campaign/);
+  c.run('state.collection="7"; renderFilters()');
+  assert.match(c.node('#active-filter').textContent, /Collection: New campaign/);
+});
+
+test('returning to Library retries collection options and rejects stale collection responses', async () => {
+  const c = client();
+  const old = c.run('loadFilterCollections()');
+  c.node('nav-library').listeners.click();
+  const options = c.requests.findIndex((r, index) => index > 0 && r.url === '/api/collections');
+  assert.notEqual(options, -1);
+  c.respondJson(options, { collections: [{ id: 2, name: 'Latest collection' }] });
+  await new Promise(resolve => setImmediate(resolve));
+  c.respondJson(0, { collections: [{ id: 1, name: 'Stale collection' }] }); await old;
+  assert.match(c.node('#filter-collection').innerHTML, /Latest collection/);
+  assert.doesNotMatch(c.node('#filter-collection').innerHTML, /Stale collection/);
+  const listing = c.requests.findIndex(r => r.url.startsWith('/api/assets?'));
+  c.respond(listing);
+});
+
+function assetDetail(uuid, title) {
+  return { asset: { uuid, title, media_type: 'document' }, tags: [], versions: [] };
+}
+function respondDetail(c, offset, uuid, title) {
+  c.respondJson(offset, assetDetail(uuid, title));
+  c.respondJson(offset + 1, {});
+  c.respondJson(offset + 2, { items: [] });
+}
+
+test('slow asset detail cannot overwrite a more recently opened asset', async () => {
+  const c = client();
+  c.run('state.user={role:"admin"}');
+  const old = c.run('openAsset("old")');
+  const current = c.run('openAsset("new")');
+  respondDetail(c, 3, 'new', 'Latest asset'); await current;
+  respondDetail(c, 0, 'old', 'Stale asset'); await old;
+  assert.match(c.node('#drawer-body').innerHTML, /Latest asset/);
+  assert.doesNotMatch(c.node('#drawer-body').innerHTML, /Stale asset/);
+});
+
+test('failed detail loads offer a retry and failed edits preserve user input', async () => {
+  const c = client();
+  c.run('state.user={role:"admin"}');
+  const failed = c.run('openAsset("example")');
+  c.requests[0].reject(new Error('offline')); await failed;
+  assert.match(c.node('#drawer-body').innerHTML, /Could not load/);
+  assert.ok(c.node('#retry-detail').listeners.click);
+  const retry = c.node('#retry-detail').listeners.click();
+  respondDetail(c, 3, 'example', 'Editable asset'); await retry;
+  c.node('#e-title').value = 'Unsaved title';
+  const save = c.node('#d-save').listeners.click();
+  c.requests[6].reject(new Error('offline')); await save;
+  assert.match(c.node('#toast').textContent, /Could not save/);
+  assert.equal(c.node('#e-title').value, 'Unsaved title');
+  assert.equal(c.node('#d-save').disabled, false);
 });
