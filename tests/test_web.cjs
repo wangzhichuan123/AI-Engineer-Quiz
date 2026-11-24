@@ -115,3 +115,14 @@ test('empty results, failed search, and retry leave clear usable states', async 
   assert.equal(c.node('#next-page').disabled, true);
   assert.equal(c.node('#export-csv').disabled, false);
 });
+
+test('JSON requests default to POST so login and tag editing work in the browser', async () => {
+  const c = client();
+  const login = c.run('api("/api/auth/login", {json: {username: "admin", password: "admin"}})');
+  assert.equal(c.requests[0].opts.method, 'POST');
+  assert.equal(c.requests[0].opts.headers['Content-Type'], 'application/json');
+  c.respond(0); await login;
+  const patch = c.run('api("/api/assets/example", {method:"PATCH", json: {title:"new"}})');
+  assert.equal(c.requests[1].opts.method, 'PATCH');
+  c.respond(1); await patch;
+});
